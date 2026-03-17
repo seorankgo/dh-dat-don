@@ -6,6 +6,10 @@ import { auth, db, googleProvider, handleFirestoreError, OperationType, initFire
 import { signInWithPopup, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp } from 'firebase/firestore';
 
+import { utils, writeFile } from 'xlsx';
+
+const LEADER_EMAILS = ['seorankgo@gmail.com', 'ngannhishop@gmail.com', 'ntvh2012@gmail.com'];
+
 const INITIAL_ORDER: Omit<Order, 'id'> = {
   orderCode: '',
   trackingCode: '',
@@ -86,7 +90,7 @@ export default function App() {
   const [payAmount, setPayAmount] = useState(0);
   const [payNote, setPayNote] = useState('');
 
-  const isLeader = user?.email === 'seorankgo@gmail.com' || user?.email === 'ngannhishop@gmail.com' || user?.email === 'ntvh2012@gmail.com';
+  const isLeader = user?.email && LEADER_EMAILS.includes(user.email);
   const isStaff = !!myStaffId;
   const role = isLeader ? 'leader' : (isStaff ? 'staff' : 'guest');
 
@@ -119,11 +123,12 @@ export default function App() {
 
     setIsLoading(true);
 
-    // If Leader, query by UID
+    // If Leader, query all data (Rules will restrict to what they can see)
     if (isLeader) {
-      const shopsQuery = query(collection(db, 'shops'), where('uid', '==', user.uid));
-      const staffQuery = query(collection(db, 'staff'), where('uid', '==', user.uid));
-      const ordersQuery = query(collection(db, 'orders'), where('uid', '==', user.uid), orderBy('createdAt', sortOrder));
+      const shopsQuery = query(collection(db, 'shops'));
+      const staffQuery = query(collection(db, 'staff'));
+      const ordersQuery = query(collection(db, 'orders'), orderBy('createdAt', sortOrder));
+      const paymentsQuery = query(collection(db, 'payments'), orderBy('date', 'desc'));
 
       const unsubShops = onSnapshot(shopsQuery, (snapshot) => {
         setShops(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Shop)));
@@ -141,7 +146,6 @@ export default function App() {
         setIsLoading(false);
       });
 
-      const paymentsQuery = query(collection(db, 'payments'), where('uid', '==', user.uid), orderBy('date', 'desc'));
       const unsubPayments = onSnapshot(paymentsQuery, (snapshot) => {
         setPayments(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Payment)));
       });
@@ -391,6 +395,40 @@ export default function App() {
     } catch (err) {
       setAppError(err instanceof Error ? err.message : String(err));
     }
+  };
+
+  const exportToExcel = () => {
+    const exportData = filteredOrders.map(order => {
+      const shop = shops.find(s => s.id === order.shopId);
+      const staffMember = staff.find(s => s.id === order.staffId);
+      const leaderComm = order.isLeaderCommChecked ? (order.shopPrice - order.purchasePrice) : 0;
+      const staffComm = order.isStaffCommChecked ? (order.dealPrice - order.purchasePrice) : 0;
+
+      return {
+        'Mã Đơn': order.orderCode,
+        'Mã Vận Đơn': order.trackingCode,
+        'Tên Đơn': order.orderName,
+        'Shop': shop?.name || 'N/A',
+        'Nhân Viên': staffMember?.name || 'N/A',
+        'Giá Shop (k)': order.shopPrice / 1000,
+        'Giá Deal (k)': order.dealPrice / 1000,
+        'Giá Mua (k)': order.purchasePrice / 1000,
+        'Lời Leader': leaderComm,
+        'Lời Nhân Viên': staffComm,
+        'Trạng Thái': order.status === 'completed' ? 'Hoàn thành' : 'Đang xử lý',
+        'Ngày Tạo': formatDate(order.createdAt)
+      };
+    });
+
+    const worksheet = utils.json_to_sheet(exportData);
+    const workbook = utils.book_new();
+    utils.book_append_sheet(workbook, worksheet, "Đơn Hàng");
+    
+    // Auto-size columns
+    const maxWidths = Object.keys(exportData[0] || {}).map(key => ({ wch: key.length + 5 }));
+    worksheet['!cols'] = maxWidths;
+
+    writeFile(workbook, `Bao_cao_don_hang_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   const exportData = () => {
@@ -715,6 +753,13 @@ export default function App() {
                 >
                   <Settings2 className="w-5 h-5" />
                   <span className="hidden md:inline">Danh mục</span>
+                </button>
+                <button
+                  onClick={exportToExcel}
+                  className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-3 rounded-xl font-semibold transition-all shadow-sm active:scale-95"
+                >
+                  <Download className="w-5 h-5" />
+                  <span className="hidden md:inline">Xuất Excel</span>
                 </button>
                 <button
                   onClick={() => setShowBulkImport(true)}
