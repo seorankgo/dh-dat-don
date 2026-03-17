@@ -1,0 +1,173 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: orders
+// Fields:
+//   - orderName: string (required, < 500 chars)
+//   - shopId: string (required)
+//   - staffId: string (required)
+//   - shopPrice: number (required)
+//   - dealPrice: number (required)
+//   - purchasePrice: number (required)
+//   - status: string (required, 'pending' | 'completed')
+//   - isStaffCommChecked: boolean (optional)
+//   - isLeaderCommChecked: boolean (optional)
+//   - uid: string (owner, required)
+//   - createdAt: timestamp (required)
+//
+// Collection: shops
+// Fields:
+//   - name: string (required, < 100 chars)
+//   - uid: string (owner, required)
+//
+// Collection: staff
+// Fields:
+//   - name: string (required, < 100 chars)
+//   - email: string (optional)
+//   - uid: string (owner, required)
+//
+// Collection: payments
+// Fields:
+//   - staffId: string (required)
+//   - staffEmail: string (required)
+//   - amount: number (required)
+//   - note: string (optional)
+//   - status: string (required, 'pending' | 'confirmed')
+//   - date: timestamp (required)
+//   - uid: string (owner, required)
+//
+// Collection: users
+// Fields:
+//   - role: string (optional)
+//   - uid: string (required)
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          ((request.auth.token.email == "seorankgo@gmail.com" || request.auth.token.email == "ngannhishop@gmail.com" || request.auth.token.email == "ntvh2012@gmail.com") && request.auth.token.email_verified == true));
+    }
+
+    // Validators
+    function isValidOrder(data) {
+      return data.orderName is string && data.orderName.size() < 500 &&
+             data.shopId is string &&
+             data.staffId is string &&
+             (data.staffEmail == null || data.staffEmail is string) &&
+             data.shopPrice is number &&
+             data.dealPrice is number &&
+             data.purchasePrice is number &&
+             data.status in ['pending', 'completed'] &&
+             (data.isStaffCommChecked == null || data.isStaffCommChecked is bool) &&
+             (data.isLeaderCommChecked == null || data.isLeaderCommChecked is bool) &&
+             data.uid is string;
+    }
+
+    function isValidShop(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.uid == request.auth.uid;
+    }
+
+    function isValidStaff(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             (data.email == null || data.email is string) &&
+             data.uid is string;
+    }
+
+    function isValidPayment(data) {
+      return data.staffId is string &&
+             data.staffEmail is string &&
+             data.amount is number &&
+             (data.note == null || data.note is string) &&
+             data.status in ['pending', 'confirmed'] &&
+             data.date is timestamp &&
+             data.uid is string;
+    }
+
+    // Matches
+    match /orders/{orderId} {
+      // Allow read if owner, admin, or assigned staff
+      allow read: if isAuthenticated() && (
+        resource == null || 
+        resource.data.uid == request.auth.uid || 
+        resource.data.staffEmail == request.auth.token.email ||
+        isAdmin()
+      );
+      allow create: if isAuthenticated() && isValidOrder(request.resource.data);
+      allow update: if isAuthenticated() && (
+        (resource.data.uid == request.auth.uid) || 
+        (resource.data.staffEmail == request.auth.token.email)
+      ) && isValidOrder(request.resource.data);
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /shops/{shopId} {
+      // Allow read for all authenticated users so staff can see shop names
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidShop(request.resource.data);
+      allow update: if isDocOwner() && isValidShop(request.resource.data);
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /staff/{staffId} {
+      // Allow staff to read their own record to find the leader's UID
+      allow read: if isAuthenticated() && (
+        resource == null || 
+        resource.data.uid == request.auth.uid || 
+        resource.data.email == request.auth.token.email ||
+        isAdmin()
+      );
+      allow create: if isAuthenticated() && isValidStaff(request.resource.data);
+      allow update: if isDocOwner() && isValidStaff(request.resource.data);
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /payments/{paymentId} {
+      allow read: if isAuthenticated() && (
+        resource == null ||
+        resource.data.uid == request.auth.uid ||
+        resource.data.staffEmail == request.auth.token.email ||
+        isAdmin()
+      );
+      allow create: if isLeader() && isValidPayment(request.resource.data);
+      allow update: if isAuthenticated() && (
+        // Leader can update anything
+        (resource.data.uid == request.auth.uid && isValidPayment(request.resource.data)) ||
+        // Staff can only update status to 'confirmed'
+        (resource.data.staffEmail == request.auth.token.email && 
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+         request.resource.data.status == 'confirmed')
+      );
+      allow delete: if isLeader();
+    }
+    
+    function isLeader() {
+      return request.auth.token.email == "seorankgo@gmail.com" || request.auth.token.email == "ngannhishop@gmail.com" || request.auth.token.email == "ntvh2012@gmail.com";
+    }
+    
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId) || isAdmin();
+    }
+  }
+}
