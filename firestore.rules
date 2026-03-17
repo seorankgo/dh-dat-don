@@ -116,7 +116,8 @@ service cloud.firestore {
       allow create: if isAuthenticated() && isValidOrder(request.resource.data);
       allow update: if isAuthenticated() && (
         (resource.data.uid == request.auth.uid) || 
-        (resource.data.staffEmail == request.auth.token.email)
+        (resource.data.staffEmail == request.auth.token.email) ||
+        isAdmin()
       ) && isValidOrder(request.resource.data);
       allow delete: if isDocOwner() || isAdmin();
     }
@@ -125,7 +126,7 @@ service cloud.firestore {
       // Allow read for all authenticated users so staff can see shop names
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidShop(request.resource.data);
-      allow update: if isDocOwner() && isValidShop(request.resource.data);
+      allow update: if (isDocOwner() || isAdmin()) && isValidShop(request.resource.data);
       allow delete: if isDocOwner() || isAdmin();
     }
 
@@ -138,7 +139,7 @@ service cloud.firestore {
         isAdmin()
       );
       allow create: if isAuthenticated() && isValidStaff(request.resource.data);
-      allow update: if isDocOwner() && isValidStaff(request.resource.data);
+      allow update: if (isDocOwner() || isAdmin()) && isValidStaff(request.resource.data);
       allow delete: if isDocOwner() || isAdmin();
     }
 
@@ -149,16 +150,16 @@ service cloud.firestore {
         resource.data.staffEmail == request.auth.token.email ||
         isAdmin()
       );
-      allow create: if isLeader() && isValidPayment(request.resource.data);
+      allow create: if isAdmin() && isValidPayment(request.resource.data);
       allow update: if isAuthenticated() && (
-        // Leader can update anything
-        (resource.data.uid == request.auth.uid && isValidPayment(request.resource.data)) ||
+        // Admin/Leader can update anything
+        ((resource.data.uid == request.auth.uid || isAdmin()) && isValidPayment(request.resource.data)) ||
         // Staff can only update status to 'confirmed'
         (resource.data.staffEmail == request.auth.token.email && 
          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
          request.resource.data.status == 'confirmed')
       );
-      allow delete: if isLeader();
+      allow delete: if isAdmin();
     }
     
     function isLeader() {
