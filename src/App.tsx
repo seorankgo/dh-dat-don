@@ -831,21 +831,46 @@ export default function App() {
             >
               <Calculator className="w-7 h-7 text-white" />
             </div>
-            <div>
-              <h1 
-                onClick={resetToHome}
-                className="text-2xl md:text-3xl font-bold tracking-tight text-slate-900 cursor-pointer hover:text-indigo-600 transition-colors"
-              >
-                DH đặt đơn hộ
-              </h1>
-              <div className="flex items-center gap-2 mt-1">
-                <img src={user.photoURL || ''} className="w-5 h-5 rounded-full" alt="avatar" />
-                <span className="text-sm text-slate-500 font-medium">{user.displayName}</span>
-                <span className="text-[10px] px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full uppercase font-bold tracking-wider">
-                  {role}
-                </span>
-                <button onClick={handleLogout} className="text-xs text-red-500 hover:underline ml-2">Đăng xuất</button>
+            <div className="flex items-center gap-6">
+              <div>
+                <h1 
+                  onClick={resetToHome}
+                  className="text-2xl md:text-3xl font-bold tracking-tight text-slate-900 cursor-pointer hover:text-indigo-600 transition-colors"
+                >
+                  DH - Đặt đơn hộ chuyên nghiệp
+                </h1>
+                <div className="flex items-center gap-2 mt-1">
+                  <img src={user.photoURL || ''} className="w-5 h-5 rounded-full" alt="avatar" />
+                  <span className="text-sm text-slate-500 font-medium">{user.displayName}</span>
+                  <span className="text-[10px] px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full uppercase font-bold tracking-wider">
+                    {role}
+                  </span>
+                  <button onClick={handleLogout} className="text-xs text-red-500 hover:underline ml-2">Đăng xuất</button>
+                </div>
               </div>
+
+              {role === 'leader' && (
+                <div className="hidden sm:flex items-center gap-2 bg-slate-100/50 p-1.5 rounded-2xl border border-slate-200/60">
+                  <div className="px-2 py-1">
+                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter leading-none">Sao lưu</p>
+                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Dự phòng</p>
+                  </div>
+                  <button
+                    onClick={exportToExcel}
+                    className="p-2.5 bg-white text-emerald-600 rounded-xl hover:bg-emerald-50 transition-colors shadow-sm border border-slate-200 active:scale-95"
+                    title="Xuất Excel (Sao lưu)"
+                  >
+                    <Download className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={() => setShowBulkImport(true)}
+                    className="p-2.5 bg-white text-indigo-600 rounded-xl hover:bg-indigo-50 transition-colors shadow-sm border border-slate-200 active:scale-95"
+                    title="Nhập Excel (Dự phòng)"
+                  >
+                    <Upload className="w-5 h-5" />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
           <div className="flex gap-2">
@@ -871,20 +896,6 @@ export default function App() {
                 >
                   <Settings2 className="w-5 h-5" />
                   <span className="hidden md:inline">Danh mục</span>
-                </button>
-                <button
-                  onClick={exportToExcel}
-                  className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-3 rounded-xl font-semibold transition-all shadow-sm active:scale-95"
-                >
-                  <Download className="w-5 h-5" />
-                  <span className="hidden md:inline">Xuất Excel</span>
-                </button>
-                <button
-                  onClick={() => setShowBulkImport(true)}
-                  className="flex items-center justify-center gap-2 bg-white border border-slate-200 text-indigo-600 px-4 py-3 rounded-xl font-semibold transition-all shadow-sm hover:bg-slate-50 active:scale-95"
-                >
-                  <Upload className="w-5 h-5" />
-                  <span className="hidden md:inline">Nhập Excel</span>
                 </button>
                 <button
                   onClick={addOrder}
@@ -1813,7 +1824,7 @@ export default function App() {
 
         {/* Footer Info */}
         <footer className="mt-8 text-center text-slate-400 text-sm">
-          <p>© 2026 Order Commission Manager • Dữ liệu được lưu trữ bảo mật trên Cloud</p>
+          <p>© 2026 DH - Đặt đơn hộ chuyên nghiệp • Dữ liệu được lưu trữ bảo mật trên Cloud</p>
         </footer>
       </div>
     );
