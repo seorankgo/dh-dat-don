@@ -210,6 +210,14 @@ export default function App() {
     }
   }, [isAuthReady, user, sortOrder, isLeader]);
 
+  const resetToHome = () => {
+    setActiveTab('orders');
+    setFilterShopId('all');
+    setFilterStaffId('all');
+    setCurrentPage(1);
+    setShowSettings(false);
+  };
+
   // Actions
   const handleLogin = async () => {
     if (isLoggingIn) return;
@@ -713,11 +721,17 @@ export default function App() {
         {/* Header */}
         <header className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-100">
+            <div 
+              onClick={resetToHome}
+              className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-100 cursor-pointer hover:scale-105 transition-transform active:scale-95"
+            >
               <Calculator className="w-7 h-7 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-slate-900">
+              <h1 
+                onClick={resetToHome}
+                className="text-2xl md:text-3xl font-bold tracking-tight text-slate-900 cursor-pointer hover:text-indigo-600 transition-colors"
+              >
                 DH đặt đơn hộ
               </h1>
               <div className="flex items-center gap-2 mt-1">
