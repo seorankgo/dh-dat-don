@@ -7,14 +7,14 @@
       "properties": {
         "orderName": { "type": "string", "description": "Tên đơn hàng" },
         "shopId": { "type": "string", "description": "ID của shop" },
-        "staffId": { "type": "string", "description": "ID của nhân viên" },
+        "staffId": { "type": "string", "description": "ID của thành viên" },
         "shopPrice": { "type": "number", "description": "Giá shop yêu cầu" },
-        "dealPrice": { "type": "number", "description": "Giá deal với nhân viên" },
+        "dealPrice": { "type": "number", "description": "Giá deal với thành viên" },
         "purchasePrice": { "type": "number", "description": "Giá mua thực tế" },
         "status": { "type": "string", "enum": ["pending", "completed"], "description": "Trạng thái đơn hàng" },
-        "isStaffCommChecked": { "type": "boolean", "description": "Nhân viên đã tích công" },
-        "isLeaderCommChecked": { "type": "boolean", "description": "Leader đã tích công" },
-        "staffEmail": { "type": "string", "description": "Email nhân viên" },
+        "isStaffCommChecked": { "type": "boolean", "description": "Thành Viên đã tích công" },
+        "isLeaderCommChecked": { "type": "boolean", "description": "Shop đã tích công" },
+        "staffEmail": { "type": "string", "description": "Email thành viên" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Ngày tạo" },
         "uid": { "type": "string", "description": "ID người dùng sở hữu" }
       },
@@ -22,7 +22,7 @@
     },
     "Payment": {
       "title": "Payment",
-      "description": "Thông tin thanh toán cho nhân viên",
+      "description": "Thông tin thanh toán cho thành viên",
       "type": "object",
       "properties": {
         "staffId": { "type": "string" },
@@ -47,10 +47,10 @@
     },
     "Staff": {
       "title": "Staff",
-      "description": "Thông tin nhân viên đặt hộ",
+      "description": "Thông tin thành viên đặt hộ",
       "type": "object",
       "properties": {
-        "name": { "type": "string", "description": "Tên nhân viên" },
+        "name": { "type": "string", "description": "Tên thành viên" },
         "uid": { "type": "string", "description": "ID người dùng sở hữu" }
       },
       "required": ["name", "uid"]
@@ -67,7 +67,7 @@
     },
     "/staff/{staffId}": {
       "schema": "Staff",
-      "description": "Danh sách nhân viên"
+      "description": "Danh sách thành viên"
     },
     "/payments/{paymentId}": {
       "schema": "Payment",

@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Order, Shop, Staff, Payment } from './types';
 import { auth, db, googleProvider, handleFirestoreError, OperationType, initFirebase } from './firebase';
 import { signInWithPopup, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, writeBatch } from 'firebase/firestore';
 
 import { utils, writeFile } from 'xlsx';
 
@@ -66,6 +66,10 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'orders' | 'payments'>('orders');
   const [filterShopId, setFilterShopId] = useState<string>('all');
   const [filterStaffId, setFilterStaffId] = useState<string>('all');
+  const [filterTrackingCode, setFilterTrackingCode] = useState('');
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 20;
@@ -214,9 +218,74 @@ export default function App() {
     setActiveTab('orders');
     setFilterShopId('all');
     setFilterStaffId('all');
+    setFilterTrackingCode('');
+    setSelectedOrderIds([]);
     setCurrentPage(1);
     setShowSettings(false);
   };
+
+  const toggleOrderSelection = (id: string, isShiftKey: boolean = false) => {
+    if (isShiftKey && lastSelectedId) {
+      const currentIndex = currentOrders.findIndex(o => o.id === id);
+      const lastIndex = currentOrders.findIndex(o => o.id === lastSelectedId);
+      
+      if (currentIndex !== -1 && lastIndex !== -1) {
+        const start = Math.min(currentIndex, lastIndex);
+        const end = Math.max(currentIndex, lastIndex);
+        const rangeIds = currentOrders.slice(start, end + 1).map(o => o.id);
+        
+        setSelectedOrderIds(prev => {
+          const newSelection = [...new Set([...prev, ...rangeIds])];
+          return newSelection;
+        });
+        setLastSelectedId(id);
+        return;
+      }
+    }
+
+    setSelectedOrderIds(prev => 
+      prev.includes(id) ? prev.filter(orderId => orderId !== id) : [...prev, id]
+    );
+    setLastSelectedId(id);
+  };
+
+  const handleMouseDown = (id: string) => {
+    setIsDragging(true);
+    toggleOrderSelection(id);
+  };
+
+  const handleMouseEnter = (id: string) => {
+    if (isDragging) {
+      setSelectedOrderIds(prev => {
+        if (!prev.includes(id)) {
+          return [...prev, id];
+        }
+        return prev;
+      });
+    }
+  };
+
+  useEffect(() => {
+    const handleMouseUp = () => setIsDragging(false);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => window.removeEventListener('mouseup', handleMouseUp);
+  }, []);
+
+  const selectAllFiltered = () => {
+    if (selectedOrderIds.length === filteredOrders.length) {
+      setSelectedOrderIds([]);
+    } else {
+      setSelectedOrderIds(filteredOrders.map(o => o.id));
+    }
+  };
+
+  const selectedTotalLeader = orders
+    .filter(o => selectedOrderIds.includes(o.id))
+    .reduce((sum, o) => sum + (o.shopPrice - o.purchasePrice), 0);
+
+  const selectedTotalStaff = orders
+    .filter(o => selectedOrderIds.includes(o.id))
+    .reduce((sum, o) => sum + (o.dealPrice - o.purchasePrice), 0);
 
   // Actions
   const handleLogin = async () => {
@@ -281,7 +350,7 @@ export default function App() {
     }
   };
 
-  const updateOrder = async (id: string, field: keyof Order, value: string | number) => {
+  const updateOrder = async (id: string, field: keyof Order, value: any) => {
     try {
       const updates: any = { [field]: value };
       
@@ -295,6 +364,30 @@ export default function App() {
     } catch (err) {
       setAppError(err instanceof Error ? err.message : String(err));
     }
+  };
+
+  const bulkUpdateOrders = async (ids: string[], field: keyof Order, value: any) => {
+    if (ids.length === 0) return;
+    try {
+      const batch = writeBatch(db);
+      ids.forEach(id => {
+        const docRef = doc(db, 'orders', id);
+        batch.update(docRef, { [field]: value });
+      });
+      await batch.commit();
+    } catch (err) {
+      setAppError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const toggleAllStaffComm = (checked: boolean) => {
+    const ids = currentOrders.map(o => o.id);
+    bulkUpdateOrders(ids, 'isStaffCommChecked', checked);
+  };
+
+  const toggleAllLeaderComm = (checked: boolean) => {
+    const ids = currentOrders.map(o => o.id);
+    bulkUpdateOrders(ids, 'isLeaderCommChecked', checked);
   };
 
   const addShop = async () => {
@@ -417,12 +510,12 @@ export default function App() {
         'Mã Vận Đơn': order.trackingCode,
         'Tên Đơn': order.orderName,
         'Shop': shop?.name || 'N/A',
-        'Nhân Viên': staffMember?.name || 'N/A',
+        'Thành Viên': staffMember?.name || 'N/A',
         'Giá Shop (k)': order.shopPrice / 1000,
         'Giá Deal (k)': order.dealPrice / 1000,
         'Giá Mua (k)': order.purchasePrice / 1000,
-        'Lời Leader': leaderComm,
-        'Lời Nhân Viên': staffComm,
+        'Lời Shop': leaderComm,
+        'Lời Thành Viên': staffComm,
         'Trạng Thái': order.status === 'completed' ? 'Hoàn thành' : 'Đang xử lý',
         'Ngày Tạo': formatDate(order.createdAt)
       };
@@ -580,9 +673,12 @@ export default function App() {
     return orders.filter(order => {
       const matchShop = filterShopId === 'all' || order.shopId === filterShopId;
       const matchStaff = filterStaffId === 'all' || order.staffId === filterStaffId;
-      return matchShop && matchStaff;
+      const matchTracking = filterTrackingCode.trim() === '' || 
+        order.trackingCode?.toLowerCase().includes(filterTrackingCode.toLowerCase()) ||
+        order.orderCode?.toLowerCase().includes(filterTrackingCode.toLowerCase());
+      return matchShop && matchStaff && matchTracking;
     });
-  }, [orders, filterShopId, filterStaffId]);
+  }, [orders, filterShopId, filterStaffId, filterTrackingCode]);
 
   const filteredPayments = useMemo(() => {
     return payments.filter(p => {
@@ -600,7 +696,7 @@ export default function App() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [filterShopId, filterStaffId]);
+  }, [filterShopId, filterStaffId, filterTrackingCode]);
 
   const totals = useMemo(() => {
     const now = new Date();
@@ -627,6 +723,10 @@ export default function App() {
         staffWeek: acc.staffWeek + (isThisWeek ? staffComm : 0),
         staffMonth: acc.staffMonth + (isThisMonth ? staffComm : 0),
         staffYear: acc.staffYear + (isThisYear ? staffComm : 0),
+        leaderToday: acc.leaderToday + (isToday ? leaderComm : 0),
+        leaderWeek: acc.leaderWeek + (isThisWeek ? leaderComm : 0),
+        leaderMonth: acc.leaderMonth + (isThisMonth ? leaderComm : 0),
+        leaderYear: acc.leaderYear + (isThisYear ? leaderComm : 0),
       };
     }, { 
       leader: 0, 
@@ -635,7 +735,11 @@ export default function App() {
       staffToday: 0,
       staffWeek: 0,
       staffMonth: 0,
-      staffYear: 0
+      staffYear: 0,
+      leaderToday: 0,
+      leaderWeek: 0,
+      leaderMonth: 0,
+      leaderYear: 0
     });
   }, [filteredOrders]);
 
@@ -838,14 +942,14 @@ export default function App() {
                 <div>
                   <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
                     <User className="w-5 h-5 text-blue-600" />
-                    Nhân viên
+                    Thành Viên
                   </h3>
                   <div className="flex flex-col gap-2 mb-4">
                     <input
                       type="text"
                       value={newStaffName}
                       onChange={(e) => setNewStaffName(e.target.value)}
-                      placeholder="Tên nhân viên mới..."
+                      placeholder="Tên thành viên mới..."
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                     />
                     <div className="flex gap-2">
@@ -1037,13 +1141,13 @@ export default function App() {
 
           {role === 'leader' && (
             <div className="flex items-center gap-3">
-              <span className="text-sm text-slate-500">Nhân viên:</span>
+              <span className="text-sm text-slate-500">Thành Viên:</span>
               <select
                 value={filterStaffId}
                 onChange={(e) => setFilterStaffId(e.target.value)}
                 className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
               >
-                <option value="all">Tất cả Nhân viên</option>
+                <option value="all">Tất cả Thành Viên</option>
                 {staff.map(st => <option key={st.id} value={st.id}>{st.name}</option>)}
               </select>
             </div>
@@ -1061,15 +1165,55 @@ export default function App() {
             </select>
           </div>
 
-          {(filterShopId !== 'all' || filterStaffId !== 'all') && (
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-slate-500">Mã đơn/vận đơn:</span>
+            <input
+              type="text"
+              placeholder="Tìm mã..."
+              value={filterTrackingCode}
+              onChange={(e) => setFilterTrackingCode(e.target.value)}
+              className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none w-40"
+            />
+          </div>
+
+          {(filterShopId !== 'all' || filterStaffId !== 'all' || filterTrackingCode !== '') && (
             <button
-              onClick={() => { setFilterShopId('all'); setFilterStaffId('all'); }}
+              onClick={() => { setFilterShopId('all'); setFilterStaffId('all'); setFilterTrackingCode(''); setSelectedOrderIds([]); }}
               className="text-sm text-indigo-600 hover:underline font-medium"
             >
               Xóa bộ lọc
             </button>
           )}
         </div>
+
+        {/* Selection Summary Floating Bar */}
+        <AnimatePresence>
+          {selectedOrderIds.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 50 }}
+              className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-8 border border-slate-700"
+            >
+              <div className="flex items-center gap-2 border-r border-slate-700 pr-8">
+                <span className="text-slate-400 text-xs uppercase font-bold tracking-wider">Đã chọn</span>
+                <span className="text-xl font-bold text-indigo-400">{selectedOrderIds.length}</span>
+              </div>
+              
+              <div className="flex flex-col">
+                <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Tổng Công Shop</span>
+                <span className="text-lg font-bold text-emerald-400">{formatCurrency(selectedTotalLeader)}</span>
+              </div>
+
+              <button 
+                onClick={() => setSelectedOrderIds([])}
+                className="ml-4 p-2 hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-white"
+              >
+                <Trash2 className="w-5 h-5" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Stats Summary */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
@@ -1083,9 +1227,27 @@ export default function App() {
                 <div className="p-2 bg-emerald-50 rounded-lg">
                   <TrendingUp className="w-5 h-5 text-emerald-600" />
                 </div>
-                <span className="text-sm font-medium text-slate-500 uppercase tracking-wider">Tiền Công Leader</span>
+                <span className="text-sm font-medium text-slate-500 uppercase tracking-wider">Tiền Công Shop</span>
               </div>
               <div className="text-2xl font-bold text-emerald-600">{formatCurrency(totals.leader)}</div>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <div className="bg-slate-50 p-2 rounded-lg">
+                  <p className="text-[10px] text-slate-400 uppercase font-bold">Hôm nay</p>
+                  <p className="text-xs font-bold text-slate-700">{formatCurrency(totals.leaderToday)}</p>
+                </div>
+                <div className="bg-slate-50 p-2 rounded-lg">
+                  <p className="text-[10px] text-slate-400 uppercase font-bold">Tuần này</p>
+                  <p className="text-xs font-bold text-slate-700">{formatCurrency(totals.leaderWeek)}</p>
+                </div>
+                <div className="bg-slate-50 p-2 rounded-lg">
+                  <p className="text-[10px] text-slate-400 uppercase font-bold">Tháng này</p>
+                  <p className="text-xs font-bold text-slate-700">{formatCurrency(totals.leaderMonth)}</p>
+                </div>
+                <div className="bg-slate-50 p-2 rounded-lg">
+                  <p className="text-[10px] text-slate-400 uppercase font-bold">Năm nay</p>
+                  <p className="text-xs font-bold text-slate-700">{formatCurrency(totals.leaderYear)}</p>
+                </div>
+              </div>
             </motion.div>
           )}
 
@@ -1099,7 +1261,7 @@ export default function App() {
               <div className="p-2 bg-blue-50 rounded-lg">
                 <User className="w-5 h-5 text-blue-600" />
               </div>
-              <span className="text-sm font-medium text-slate-500 uppercase tracking-wider">Tiền Công Nhân Viên</span>
+              <span className="text-sm font-medium text-slate-500 uppercase tracking-wider">Tiền Công Thành Viên</span>
             </div>
             <div className="text-2xl font-bold text-blue-600">{formatCurrency(totals.staff)}</div>
             <div className="mt-4 grid grid-cols-2 gap-2">
@@ -1187,13 +1349,43 @@ export default function App() {
                       <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Giá Deal (K)</th>
                       <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Giá Mua (K)</th>
                       {role === 'leader' && (
-                        <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Nhân Viên</th>
+                        <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Thành Viên</th>
                       )}
                       <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Mã Đơn</th>
-                      <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Mã Vận Đơn</th>
-                      <th className="p-4 text-xs font-bold text-blue-600 uppercase tracking-wider bg-blue-50/30">Công Staff</th>
+                      <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                        <div className="flex items-center gap-2">
+                          <input 
+                            type="checkbox" 
+                            checked={filteredOrders.length > 0 && selectedOrderIds.length === filteredOrders.length}
+                            onChange={selectAllFiltered}
+                            className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                          />
+                          Mã Vận Đơn
+                        </div>
+                      </th>
+                      <th className="p-4 text-xs font-bold text-blue-600 uppercase tracking-wider bg-blue-50/30">
+                        <div className="flex items-center gap-2">
+                          <input 
+                            type="checkbox"
+                            checked={currentOrders.length > 0 && currentOrders.every(o => o.isStaffCommChecked)}
+                            onChange={(e) => toggleAllStaffComm(e.target.checked)}
+                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                          />
+                          Công Thành Viên
+                        </div>
+                      </th>
                       {role === 'leader' && (
-                        <th className="p-4 text-xs font-bold text-indigo-600 uppercase tracking-wider bg-indigo-50/30">Công Leader</th>
+                        <th className="p-4 text-xs font-bold text-indigo-600 uppercase tracking-wider bg-indigo-50/30">
+                          <div className="flex items-center gap-2">
+                            <input 
+                              type="checkbox"
+                              checked={currentOrders.length > 0 && currentOrders.every(o => o.isLeaderCommChecked)}
+                              onChange={(e) => toggleAllLeaderComm(e.target.checked)}
+                              className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                            />
+                            Công Shop
+                          </div>
+                        </th>
                       )}
                       <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-10"></th>
                     </tr>
@@ -1322,13 +1514,26 @@ export default function App() {
                                 )}
                               </div>
                             </td>
-                            <td className="p-3">
+                            <td 
+                              className={`p-3 cursor-pointer transition-colors select-none ${selectedOrderIds.includes(order.id) ? 'bg-indigo-100' : ''}`}
+                              onMouseDown={() => handleMouseDown(order.id)}
+                              onMouseEnter={() => handleMouseEnter(order.id)}
+                              onClick={(e) => {
+                                if (e.shiftKey) {
+                                  e.preventDefault();
+                                  toggleOrderSelection(order.id, true);
+                                }
+                              }}
+                            >
                               <input
                                 type="text"
                                 value={order.trackingCode || ''}
                                 onChange={(e) => updateOrder(order.id, 'trackingCode', e.target.value)}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onMouseEnter={(e) => e.stopPropagation()}
+                                onClick={(e) => e.stopPropagation()}
                                 placeholder="Mã vận đơn..."
-                                className="w-32 bg-transparent border-none focus:ring-0 text-sm font-mono placeholder:text-slate-300 disabled:opacity-100"
+                                className="w-32 bg-transparent border-none focus:ring-0 text-sm font-mono placeholder:text-slate-300 disabled:opacity-100 pointer-events-auto"
                                 disabled={role === 'staff'}
                               />
                             </td>
@@ -1465,13 +1670,13 @@ export default function App() {
                   </h3>
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Nhân viên</label>
+                      <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Thành Viên</label>
                       <select
                         value={payStaffId}
                         onChange={(e) => setPayStaffId(e.target.value)}
                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                       >
-                        <option value="">Chọn nhân viên...</option>
+                        <option value="">Chọn thành viên...</option>
                         {staff.map(st => <option key={st.id} value={st.id}>{st.name}</option>)}
                       </select>
                     </div>
@@ -1519,7 +1724,7 @@ export default function App() {
                       <tr className="bg-slate-50 border-bottom border-slate-200">
                         <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Ngày giờ</th>
                         {role === 'leader' && (
-                          <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Nhân viên</th>
+                          <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Thành Viên</th>
                         )}
                         <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Số tiền</th>
                         <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Ghi chú</th>
